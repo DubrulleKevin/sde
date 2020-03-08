@@ -5,57 +5,60 @@ set -eu
 _BASE="mycentos6"
 _VERSION="2"
 
+_USER_NAME="${SUDO_USER}"
+_USER_SHELL="$(getent passwd $_USER_NAME | cut -d':' -f7)"
+_USER_HOME="$(getent passwd $_USER_NAME | cut -d':' -f6)"
+_USER_UID="$(id -u $_USER_NAME)"
+_USER_GID="$(id -g $_USER_NAME)"
+_USER_PRIMARY_GROUP_NAME="$(id -gn $_USER_NAME)"
+_USER_GROUPS_NAME="$(id -Gn $_USER_NAME)"
+
 start () {
-	_SHELL="$(getent passwd $SUDO_USER | cut -d':' -f7)"
-        _HOME="$(getent passwd $SUDO_USER | cut -d':' -f6)"
-	if [ "$(docker ps | grep ${SUDO_USER}_sde_container)" ]; then
-		if [ "$(docker images | grep ${SUDO_USER}_sde_image | awk '{ print $2 }')" != "${_VERSION}" ]; then
+	if [ "$(docker ps | grep ${_USER_NAME}_sde_container)" ]; then
+		if [ "$(docker images | grep ${_USER_NAME}_sde_image | awk '{ print $2 }')" != "${_VERSION}" ]; then
 			echo "An updated SDE version is available. Please run sde update"
 		fi
-		docker exec -it -w $_HOME ${SUDO_USER}_sde_container $_SHELL
-	elif [ "$(docker ps -a | grep ${SUDO_USER}_sde_container)" ]; then
-		if [ "$(docker images | grep ${SUDO_USER}_sde_image | awk '{ print $2 }')" != "${_VERSION}" ]; then
+		docker exec -it -w $_USER_HOME ${_USER_NAME}_sde_container $_USER_SHELL
+	elif [ "$(docker ps -a | grep ${_USER_NAME}_sde_container)" ]; then
+		if [ "$(docker images | grep ${_USER_NAME}_sde_image | awk '{ print $2 }')" != "${_VERSION}" ]; then
                         echo "An updated SDE version is available. Please run sde update"
                 fi
-                docker start ${SUDO_USER}_sde_container
-		docker exec -it -w $_HOME ${SUDO_USER}_sde_container $_SHELL
+                docker start ${_USER_NAME}_sde_container
+		docker exec -it -w $_USER_HOME ${_USER_NAME}_sde_container $_USER_SHELL
 	else
 		create
 	fi
 }
 
 create () {
-	_GROUPS="$(id -Gn $SUDO_USER)"
-	_GROUP_LINE=""
-	_SHELL="$(getent passwd $SUDO_USER | cut -d':' -f7)"
-	_HOME="$(getent passwd $SUDO_USER | cut -d':' -f6)"
-	_TEMP_DIR="$(mktemp -d)"
+	local _GROUPS_LINE=""
+	local _TEMP_DIR="$(mktemp -d)"
 	echo "FROM ${_BASE}:${_VERSION}" >> $_TEMP_DIR/Dockerfile
 	printf "RUN " >> $_TEMP_DIR/Dockerfile
-	for _GROUP in $_GROUPS; do
+	for _GROUP in $_USER_GROUPS_NAME; do
 		_GROUP_ID="$(getent group $_GROUP | cut -d':' -f3)"
-		if [ "$_GROUP" != "$(id -gn $SUDO_USER)" ]; then
-			_GROUP_LINE="$_GROUP_LINE --group-add $_GROUP"
+		if [ "$_GROUP" != "${_USER_PRIMARY_GROUP_NAME}" ]; then
+			_GROUPS_LINE="$_GROUPS_LINE --group-add $_GROUP"
 		fi
 		printf "groupadd -f -g $_GROUP_ID $_GROUP && " >> $_TEMP_DIR/Dockerfile
 	done
-	printf "useradd -M -s $_SHELL -d $_HOME -g $(id -g $SUDO_USER) -G $(echo $_GROUPS | sed 's/ /,/g') -u $(id -u $SUDO_USER) $SUDO_USER" >> $_TEMP_DIR/Dockerfile
+	printf "useradd -M -s $_USER_SHELL -d $_USER_HOME -g $_USER_GID -G $(echo $_USER_GROUPS_NAME | sed 's/ /,/g') -u $_USER_UID $_USER_NAME" >> $_TEMP_DIR/Dockerfile
 	cd $_TEMP_DIR
-	docker build -t ${SUDO_USER}_sde_image:${_VERSION} .
+	docker build -t ${_USER_NAME}_sde_image:${_VERSION} .
 	cd - &> /dev/null
 	rm -rf $_TEMP_DIR
-	docker run --name ${SUDO_USER}_sde_container -h ${HOSTNAME}_sde_container --user $(id -u $SUDO_USER):$(id -g $SUDO_USER) $_GROUP_LINE -v /home:/home -it -d ${SUDO_USER}_sde_image:${_VERSION} $_SHELL
-	docker exec -it -w $_HOME ${SUDO_USER}_sde_container $_SHELL
+	docker run --name ${_USER_NAME}_sde_container -h ${HOSTNAME}_sde_container --user ${_USER_UID}:${_USER_GID} $_GROUPS_LINE -v /home:/home -it -d ${_USER_NAME}_sde_image:${_VERSION} $_USER_SHELL
+	docker exec -it -w $_USER_HOME ${_USER_NAME}_sde_container $_USER_SHELL
 }
 
 clean () {
-        if docker ps | grep ${SUDO_USER}_sde_container &> /dev/null; then
-                docker stop ${SUDO_USER}_sde_container
-                docker rm ${SUDO_USER}_sde_container
-        elif docker ps -a | grep ${SUDO_USER}_sde_container &> /dev/null; then
-                docker rm ${SUDO_USER}_sde_container
+        if docker ps | grep ${_USER_NAME}_sde_container &> /dev/null; then
+                docker stop ${_USER_NAME}_sde_container
+                docker rm ${_USER_NAME}_sde_container
+        elif docker ps -a | grep ${_USER_NAME}_sde_container &> /dev/null; then
+                docker rm ${_USER_NAME}_sde_container
         fi
-        docker images | grep ${SUDO_USER}_sde_image | while read L; do
+        docker images | grep ${_USER_NAME}_sde_image | while read L; do
                 docker rmi $(echo $L | awk '{ print $3 }')
         done
 }
